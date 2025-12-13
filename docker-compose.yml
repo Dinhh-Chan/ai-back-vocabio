@@ -9,7 +9,6 @@ x-common-volumes: &common-volumes
     - ./alembic:/app/alembic
     - ./requirements.txt:/app/requirements.txt
     - ./.env:/app/.env
-    - ./entrypoint.sh:/app/entrypoint.sh
 
 services:
   db:
