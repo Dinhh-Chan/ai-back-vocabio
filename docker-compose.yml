@@ -6,7 +6,6 @@ x-common: &common
 x-common-volumes: &common-volumes
   volumes:
     - ./app:/app/app
-    - ./alembic:/app/alembic
     - ./requirements.txt:/app/requirements.txt
     - ./.env:/app/.env
 
@@ -24,19 +23,6 @@ services:
       timeout: 10s
       retries: 10
 
-  alembic:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    <<: 
-      - *common
-      - *common-volumes
-    command: [ "alembic", "upgrade", "head" ]
-    restart: "no"
-    depends_on:
-      db:
-        condition: service_healthy
-
   app:
     build:
       context: .
@@ -50,5 +36,3 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      alembic:
-        condition: service_completed_successfully

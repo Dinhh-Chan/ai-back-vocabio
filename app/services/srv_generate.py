@@ -42,7 +42,7 @@ def get_ocr_instance():
     """Lazy load PaddleOCR instance"""
     global _ocr_instance
     if _ocr_instance is None:
-        _ocr_instance = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False)
+        _ocr_instance = PaddleOCR(use_angle_cls=True, lang='en')
     return _ocr_instance
 
 
@@ -295,7 +295,7 @@ async def ocr_reading_analysis_service(
     try:
         # Sử dụng PaddleOCR để extract text
         ocr = get_ocr_instance()
-        result = ocr.ocr(tmp_file_path, cls=True)
+        result = ocr.ocr(tmp_file_path)
         
         # Xử lý kết quả OCR
         extracted_text = ""
