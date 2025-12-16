@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, Field
 
@@ -39,6 +39,10 @@ class ChatBotRequest(BaseModel):
         ...,
         description="Câu hỏi/thắc mắc về tiếng Anh hoặc kỳ thi IELTS của học viên",
         min_length=1,
+    )
+    history: Optional[List[dict]] = Field(
+        default=None,
+        description="Lịch sử hội thoại trước đó, dạng list các object {role, content} với role thuộc {system,user,assistant}",
     )
 
 

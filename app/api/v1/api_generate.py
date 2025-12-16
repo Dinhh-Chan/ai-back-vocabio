@@ -1,6 +1,6 @@
 from typing import Any
 from fastapi import APIRouter, status, UploadFile, File, Form, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.utils.exception_handler import CustomException
 from app.schemas.sche_response import DataResponse
@@ -20,6 +20,7 @@ from app.services.srv_generate import (
     ocr_reading_analysis_service,
     cleanup_temp_file,
     chat_bot_service,
+    chat_bot_stream_generator,
 )
 
 router = APIRouter(prefix=f"/generate")
@@ -58,13 +59,6 @@ async def speech_to_text_analysis(
     audio_file: UploadFile = File(..., description="File audio bài nói IELTS"),
     topic: str = Form(None, description="Đề bài/chủ đề bài nói (tùy chọn)")
 ) -> Any:
-    """"""
-    API chuyển đổi speech to text và phân tích bài nói IELTS
-    
-    - Nhận file audio từ người dùng
-    - Sử dụng Whisper-1 để chuyển đổi thành text
-    - Gửi text cho LLM để phân tích band điểm, điểm mạnh, điểm yếu
-    """"""
     try:
         # Kiểm tra file audio
         if not audio_file.content_type or not audio_file.content_type.startswith('audio/'):
@@ -106,13 +100,6 @@ async def text_to_speech(
     request: TextToSpeechRequest,
     background_tasks: BackgroundTasks
 ) -> FileResponse:
-    """"""
-    API chuyển đổi text to speech sử dụng gTTS
-    
-    - Nhận text từ người dùng
-    - Sử dụng gTTS để chuyển đổi thành audio
-    - Trả về file audio MP3
-    """"""
     try:
         # Gọi service để xử lý
         tmp_file_path, file_response = text_to_speech_service(
@@ -143,13 +130,6 @@ async def ocr_reading_analysis(
     image_file: UploadFile = File(..., description="File ảnh bài viết Reading IELTS"),
     topic: str = Form(None, description="Đề bài/chủ đề bài viết (tùy chọn)")
 ) -> Any:
-    """"""
-    API OCR ảnh thành text và phân tích bài viết Reading IELTS
-    
-    - Nhận file ảnh từ người dùng
-    - Sử dụng PaddleOCR để chuyển đổi ảnh thành text
-    - Gửi text cho LLM để phân tích band điểm, điểm mạnh, điểm yếu
-    """"""
     try:
         # Kiểm tra file ảnh
         if not image_file.content_type or not image_file.content_type.startswith('image/'):
@@ -189,15 +169,10 @@ async def ocr_reading_analysis(
     status_code=status.HTTP_200_OK,
 )
 def chat_bot(request: ChatBotRequest) -> Any:
-    """"""
-    API chatbot giải đáp thắc mắc về tiếng Anh / IELTS cho học viên.
-
-    - Nhận câu hỏi/thắc mắc từ học viên
-    - Sử dụng LLM để trả lời vai giáo viên/coach thân thiện, dễ hiểu
-    """"""
     try:
         result = chat_bot_service(
             question=request.question,
+            history=request.history,
         )
 
         return DataResponse(
@@ -211,4 +186,27 @@ def chat_bot(request: ChatBotRequest) -> Any:
         raise CustomException(
             http_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             message=f"Lỗi khi xử lý chatbot: {str(e)}"
+        )
+
+
+@router.post(
+    "/chat-bot-stream",
+    status_code=status.HTTP_200_OK,
+)
+def chat_bot_stream(request: ChatBotRequest) -> StreamingResponse:
+    """
+    Endpoint trả về câu trả lời chatbot dạng streaming (plain text).
+    """
+    try:
+        generator = chat_bot_stream_generator(
+            question=request.question,
+            history=request.history,
+        )
+        return StreamingResponse(generator, media_type="text/plain; charset=utf-8")
+    except CustomException:
+        raise
+    except Exception as e:
+        raise CustomException(
+            http_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            message=f"Lỗi khi xử lý chatbot streaming: {str(e)}"
         )
