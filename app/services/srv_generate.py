@@ -19,7 +19,8 @@ from app.utils.exception_handler import CustomException
 from app.schemas.sche_generate import (
     GenerateSentenceResponse,
     SpeechToTextResponse,
-    OCRReadingResponse
+    OCRReadingResponse,
+    ChatBotResponse,
 )
 
 
@@ -359,3 +360,44 @@ Lưu ý:
     finally:
         # Xóa file tạm
         cleanup_temp_file(tmp_file_path)
+
+
+def chat_bot_service(
+    question: str,
+) -> ChatBotResponse:
+    """Service chatbot giải đáp thắc mắc về tiếng Anh / IELTS cho học viên."""
+    q = (question or "").strip()
+    if not q:
+        raise CustomException(
+            http_code=status.HTTP_400_BAD_REQUEST,
+            message="Câu hỏi không được để trống",
+        )
+
+    prompt = f"""
+Bạn là một giáo viên tiếng Anh kiêm chuyên gia IELTS thân thiện và dễ hiểu.
+Nhiệm vụ của bạn là giải đáp thắc mắc cho học viên về ngữ pháp, từ vựng, phát âm,
+chiến lược làm bài thi IELTS, hoặc bất kỳ câu hỏi nào liên quan đến việc học tiếng Anh.
+
+Câu hỏi/thắc mắc của học viên:
+"{q}"
+
+Yêu cầu về cách trả lời:
+- Trả lời CHỦ YẾU bằng tiếng Việt, nhưng hãy đưa ví dụ minh hoạ bằng tiếng Anh khi cần.
+- Giải thích rõ ràng, dễ hiểu cho người học Việt Nam.
+- Giải thích ngắn gọn nhưng đầy đủ ý, có thể chia ý bằng bullet nếu cần.
+- Ưu tiên cho ví dụ cụ thể, dễ áp dụng.
+
+Chỉ trả về NỘI DUNG CÂU TRẢ LỜI cho học viên, không thêm JSON, không thêm tiền tố như 'Answer:'.
+"""
+
+    messages = [HumanMessage(content=prompt)]
+    response = get_llm.invoke(messages)
+    answer = (response.content or "").strip()
+
+    if not answer:
+        raise CustomException(
+            http_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            message="Không thể tạo được câu trả lời từ mô hình. Vui lòng thử lại sau.",
+        )
+
+    return ChatBotResponse(answer=answer)

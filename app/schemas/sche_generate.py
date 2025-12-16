@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -31,3 +33,17 @@ class OCRReadingResponse(BaseModel):
     overall_feedback: str = Field(..., description="Nhận xét tổng quan về bài viết")
     suggestions: str = Field(..., description="Gợi ý cải thiện")
 
+
+class ChatBotRequest(BaseModel):
+    question: str = Field(
+        ...,
+        description="Câu hỏi/thắc mắc về tiếng Anh hoặc kỳ thi IELTS của học viên",
+        min_length=1,
+    )
+
+
+class ChatBotResponse(BaseModel):
+    answer: str = Field(
+        ...,
+        description="Câu trả lời/gợi ý chi tiết cho câu hỏi của học viên, có ví dụ minh hoạ nếu phù hợp",
+    )
