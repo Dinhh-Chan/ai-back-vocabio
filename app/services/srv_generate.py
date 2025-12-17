@@ -151,7 +151,8 @@ async def speech_to_text_analysis_service(
         with open(tmp_file_path, "rb") as audio_file_obj:
             transcript_response = client.audio.transcriptions.create(
                 model="whisper-1",
-                file=audio_file_obj
+                file=audio_file_obj,
+                language="en"
             )
         
         transcript = transcript_response.text.strip()
