@@ -43,7 +43,11 @@ def get_ocr_instance():
     """Lazy load PaddleOCR instance"""
     global _ocr_instance
     if _ocr_instance is None:
-        _ocr_instance = PaddleOCR(use_angle_cls=True, lang='en')
+        _ocr_instance = PaddleOCR(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False
+        )
     return _ocr_instance
 
 
@@ -255,68 +259,97 @@ def text_to_speech_service(text: str, lang: str) -> Tuple[str, FileResponse]:
 
 
 async def ocr_reading_analysis_service(
-    image_content: bytes,
-    image_filename: str,
+    image_content: bytes = None,
+    image_filename: str = None,
+    text_content: str = None,
     topic: str = None
 ) -> OCRReadingResponse:
     """
-    Service để OCR ảnh thành text và phân tích bài viết Reading IELTS
+    Service để phân tích bài viết IELTS Writing
+    Có thể truyền ảnh (sẽ OCR) hoặc text trực tiếp
     
     Args:
-        image_content: Nội dung file ảnh (bytes)
-        image_filename: Tên file ảnh
+        image_content: Nội dung file ảnh (bytes) - tùy chọn
+        image_filename: Tên file ảnh - tùy chọn
+        text_content: Text bài viết trực tiếp - tùy chọn
         topic: Đề bài/chủ đề bài viết (tùy chọn)
     
     Returns:
         OCRReadingResponse chứa extracted text và phân tích
     """
-    # Kiểm tra file có dữ liệu không
-    if not image_content or len(image_content) == 0:
-        raise CustomException(
-            http_code=status.HTTP_400_BAD_REQUEST,
-            message="File ảnh không hợp lệ hoặc rỗng"
-        )
+    extracted_text = ""
+    tmp_file_path = None
     
-    # Mở ảnh bằng PIL để kiểm tra
-    try:
-        image = Image.open(BytesIO(image_content))
-        image.verify()  # Verify that it's a valid image
-    except Exception as e:
-        raise CustomException(
-            http_code=status.HTTP_400_BAD_REQUEST,
-            message=f"File ảnh không hợp lệ: {str(e)}"
-        )
+    # Nếu có text trực tiếp -> sử dụng luôn
+    if text_content and text_content.strip():
+        extracted_text = text_content.strip()
     
-    # Tạo file tạm để lưu ảnh
-    file_ext = image_filename.split('.')[-1] if image_filename else 'jpg'
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp_file:
-        tmp_file.write(image_content)
-        tmp_file_path = tmp_file.name
-    
-    try:
-        # Sử dụng PaddleOCR để extract text
-        ocr = get_ocr_instance()
-        result = ocr.ocr(tmp_file_path)
-        
-        # Xử lý kết quả OCR
-        extracted_text = ""
-        if result and result[0]:
-            # Kết hợp tất cả text từ các dòng
-            text_lines = []
-            for line in result[0]:
-                if line and len(line) >= 2:
-                    text_lines.append(line[1][0])  # line[1][0] là text được nhận diện
-            extracted_text = "\n".join(text_lines).strip()
-        
-        if not extracted_text:
+    # Nếu có ảnh -> OCR
+    elif image_content:
+        # Kiểm tra file có dữ liệu không
+        if len(image_content) == 0:
             raise CustomException(
                 http_code=status.HTTP_400_BAD_REQUEST,
-                message="Không thể trích xuất text từ ảnh. Vui lòng kiểm tra lại chất lượng ảnh."
+                message="File ảnh không hợp lệ hoặc rỗng"
             )
         
-        # Tạo prompt để phân tích bài viết Reading IELTS
-        topic_info = f"\nĐề bài/Chủ đề: {topic}" if topic else ""
-        prompt = f"""Bạn là một giám khảo IELTS chuyên nghiệp. Hãy phân tích bài viết Reading sau đây của thí sinh và đưa ra đánh giá chi tiết.
+        # Mở ảnh bằng PIL để kiểm tra
+        try:
+            image = Image.open(BytesIO(image_content))
+            image.verify()  # Verify that it's a valid image
+        except Exception as e:
+            raise CustomException(
+                http_code=status.HTTP_400_BAD_REQUEST,
+                message=f"File ảnh không hợp lệ: {str(e)}"
+            )
+        
+        # Tạo file tạm để lưu ảnh
+        file_ext = image_filename.split('.')[-1] if image_filename else 'jpg'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp_file:
+            tmp_file.write(image_content)
+            tmp_file_path = tmp_file.name
+        
+        try:
+            # Sử dụng PaddleOCR để extract text
+            ocr = get_ocr_instance()
+            result = ocr.predict(tmp_file_path)
+            
+            # Xử lý kết quả OCR (PP-OCRv5 với phương thức predict())
+            # Result object có thuộc tính: rec_texts, rec_scores, dt_polys, dt_scores
+            if result and len(result) > 0:
+                # result[0] là Result object cho ảnh đầu tiên
+                res = result[0]
+                # Lấy danh sách text từ thuộc tính rec_texts
+                if hasattr(res, 'rec_texts') and res.rec_texts:
+                    extracted_text = "\n".join(res.rec_texts).strip()
+                elif isinstance(res, dict) and 'rec_texts' in res:
+                    extracted_text = "\n".join(res['rec_texts']).strip()
+            
+            if not extracted_text:
+                raise CustomException(
+                    http_code=status.HTTP_400_BAD_REQUEST,
+                    message="Không thể trích xuất text từ ảnh. Vui lòng kiểm tra lại chất lượng ảnh."
+                )
+        finally:
+            # Xóa file tạm
+            if tmp_file_path:
+                cleanup_temp_file(tmp_file_path)
+    
+    else:
+        raise CustomException(
+            http_code=status.HTTP_400_BAD_REQUEST,
+            message="Phải cung cấp ảnh hoặc text bài viết"
+        )
+    
+    if not extracted_text:
+        raise CustomException(
+            http_code=status.HTTP_400_BAD_REQUEST,
+            message="Không có nội dung bài viết để phân tích"
+        )
+    
+    # Tạo prompt để phân tích bài viết Writing IELTS
+    topic_info = f"\nĐề bài/Chủ đề: {topic}" if topic else ""
+    prompt = f"""Bạn là một giám khảo IELTS chuyên nghiệp. Hãy phân tích bài viết Writing sau đây của thí sinh và đưa ra đánh giá chi tiết.
 
 {topic_info}
 
@@ -333,33 +366,29 @@ Hãy phân tích và trả về kết quả theo định dạng JSON sau (chỉ 
 }}
 
 Lưu ý:
-- Đánh giá dựa trên các tiêu chí IELTS Writing/Reading: Task Achievement, Coherence and Cohesion, Lexical Resource, Grammatical Range and Accuracy
+- Đánh giá dựa trên các tiêu chí IELTS Writing: Task Achievement, Coherence and Cohesion, Lexical Resource, Grammatical Range and Accuracy
 - Band score từ 0.0 đến 9.0
 - Đưa ra nhận xét chi tiết và cụ thể, có ví dụ minh họa nếu có thể
 - Phân tích cả về nội dung, cấu trúc, từ vựng và ngữ pháp"""
-        
-        # Gọi LLM để phân tích
-        messages = [HumanMessage(content=prompt)]
-        llm_response = get_llm.invoke(messages)
-        
-        # Parse response từ LLM
-        analysis_data = parse_llm_response(
-            llm_response.content,
-            ["band_score", "strengths", "weaknesses", "overall_feedback", "suggestions"]
-        )
-        
-        return OCRReadingResponse(
-            extracted_text=extracted_text,
-            band_score=analysis_data.get("band_score", "N/A"),
-            strengths=analysis_data.get("strengths", ""),
-            weaknesses=analysis_data.get("weaknesses", ""),
-            overall_feedback=analysis_data.get("overall_feedback", ""),
-            suggestions=analysis_data.get("suggestions", "")
-        )
     
-    finally:
-        # Xóa file tạm
-        cleanup_temp_file(tmp_file_path)
+    # Gọi LLM để phân tích
+    messages = [HumanMessage(content=prompt)]
+    llm_response = get_llm.invoke(messages)
+    
+    # Parse response từ LLM
+    analysis_data = parse_llm_response(
+        llm_response.content,
+        ["band_score", "strengths", "weaknesses", "overall_feedback", "suggestions"]
+    )
+    
+    return OCRReadingResponse(
+        extracted_text=extracted_text,
+        band_score=analysis_data.get("band_score", "N/A"),
+        strengths=analysis_data.get("strengths", ""),
+        weaknesses=analysis_data.get("weaknesses", ""),
+        overall_feedback=analysis_data.get("overall_feedback", ""),
+        suggestions=analysis_data.get("suggestions", "")
+    )
 
 
 def chat_bot_service(
@@ -443,10 +472,9 @@ Bạn là một giáo viên tiếng Anh kiêm chuyên gia IELTS thân thiện v�
 Nhiệm vụ của bạn là giải đáp thắc mắc cho học viên về ngữ pháp, từ vựng, phát âm và nói chuyện về chiến lược làm bài thi IELTS, hoặc bất kỳ câu hỏi nào liên quan đến việc học tiếng Anh.
 Yêu cầu về cách trả lời:
 - Trả lời CHỦ YẾU bằng tiếng Việt, nhưng hãy đưa ví dụ minh hoạ bằng tiếng Anh khi cần.
-- Giải thích rõ ràng, dễ hiểu.
 - Giải thích ngắn gọn, rõ ràng, không lan man.
 - Ưu tiên cho ví dụ cụ thể, dễ áp dụng.
-- Định dạng nội dung bằng Markdown (dùng bullet list, in đậm tiêu đề ngắn, xuống dòng rõ ràng).
+- Định dạng nội dung bằng Markdown.
 
 Chỉ trả về NỘI DUNG CÂU TRẢ LỜI cho học viên, không thêm JSON, không thêm tiền tố như 'Answer:'.
 """

@@ -126,27 +126,52 @@ async def text_to_speech(
     response_model=DataResponse[OCRReadingResponse],
     status_code=status.HTTP_200_OK,
 )
-async def ocr_reading_analysis(
-    image_file: UploadFile = File(..., description="File ảnh bài viết Reading IELTS"),
+async def writing_analysis(
+    image_file: UploadFile = File(None, description="File ảnh bài viết IELTS (truyền ảnh HOẶC text, không truyền cả 2)"),
+    text: str = Form(None, description="Text bài viết trực tiếp (truyền ảnh HOẶC text, không truyền cả 2)"),
     topic: str = Form(None, description="Đề bài/chủ đề bài viết (tùy chọn)")
 ) -> Any:
     try:
-        # Kiểm tra file ảnh
-        if not image_file.content_type or not image_file.content_type.startswith('image/'):
+        has_image = image_file is not None and image_file.filename
+        has_text = text is not None and text.strip()
+        
+        # Validate: chỉ được truyền 1 trong 2
+        if has_image and has_text:
             raise CustomException(
                 http_code=status.HTTP_400_BAD_REQUEST,
-                message="File phải là định dạng ảnh (jpg, png, etc.)"
+                message="Chỉ được truyền ảnh HOẶC text, không được truyền cả 2"
             )
         
-        # Đọc file ảnh
-        image_content = await image_file.read()
+        if not has_image and not has_text:
+            raise CustomException(
+                http_code=status.HTTP_400_BAD_REQUEST,
+                message="Phải truyền ảnh hoặc text bài viết"
+            )
         
-        # Gọi service để xử lý
-        result = await ocr_reading_analysis_service(
-            image_content=image_content,
-            image_filename=image_file.filename or "image.jpg",
-            topic=topic
-        )
+        # Nếu có ảnh -> OCR rồi phân tích
+        if has_image:
+            # Kiểm tra file ảnh
+            if not image_file.content_type or not image_file.content_type.startswith('image/'):
+                raise CustomException(
+                    http_code=status.HTTP_400_BAD_REQUEST,
+                    message="File phải là định dạng ảnh (jpg, png, etc.)"
+                )
+            
+            # Đọc file ảnh
+            image_content = await image_file.read()
+            
+            # Gọi service để xử lý OCR + phân tích
+            result = await ocr_reading_analysis_service(
+                image_content=image_content,
+                image_filename=image_file.filename or "image.jpg",
+                topic=topic
+            )
+        else:
+            # Nếu có text -> phân tích trực tiếp
+            result = await ocr_reading_analysis_service(
+                text_content=text.strip(),
+                topic=topic
+            )
         
         return DataResponse(
             http_code=status.HTTP_200_OK,
@@ -159,7 +184,7 @@ async def ocr_reading_analysis(
     except Exception as e:
         raise CustomException(
             http_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            message=f"Lỗi khi xử lý OCR: {str(e)}"
+            message=f"Lỗi khi xử lý phân tích bài viết: {str(e)}"
         )
 
 
